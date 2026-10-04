@@ -1,0 +1,52 @@
+name: Build
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar el proyecto
+        run: |
+          echo "=== Archivos del repositorio ==="
+          find . -path ./.git -prune -o -type f -print | head -50
+          mkdir work
+          for z in *.zip; do unzip -q -o "$z" -d work; done
+          SRC=$(find work -type d -path "*/src/main/java" | head -n 1)
+          if [ -z "$SRC" ]; then
+            echo "ERROR: no se encuentra el código del mod dentro del zip"
+            exit 1
+          fi
+          ROOT=$(dirname "$(dirname "$(dirname "$SRC")")")
+          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
+          echo "Proyecto en: $ROOT"
+          echo "Archivos .java: $(find "$ROOT/src/main/java" -name '*.java' | wc -l)"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.1.1
+          cache-disabled: true
+
+      - name: Build
+        run: gradle build --no-daemon --console=plain -p "$PROJECT_DIR"
+
+      - name: Comprobar el jar
+        run: |
+          ls -la "$PROJECT_DIR/build/libs"
+          JAR=$(ls "$PROJECT_DIR"/build/libs/*.jar | head -n 1)
+          SIZE=$(stat -c%s "$JAR")
+          echo "Tamaño del jar: $SIZE bytes"
+          if [ "$SIZE" -lt 30000 ]; then echo "ERROR: el jar está vacío"; exit 1; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hoji-jar
+          path: ${{ env.PROJECT_DIR }}/build/libs/*.jar
